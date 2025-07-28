@@ -112,7 +112,7 @@ module.exports = {
             shipping_address,
             shipping_cost: shipping_cost || 0,
             transfer_proof: transferProofPath,
-            status: "proses",
+            status: "pending",
             items_count: parseItems.length,
           },
         });
@@ -150,7 +150,10 @@ module.exports = {
         queryParams.push(parseInt(user_id));
       }
 
-      if (status && ["proses", "dikirim", "selesai"].includes(status)) {
+      if (
+        status &&
+        ["pending", "proses", "dikirim", "selesai"].includes(status)
+      ) {
         whereConditions.push("o.status = ?");
         queryParams.push(status);
       }
@@ -274,10 +277,11 @@ module.exports = {
       const updateValues = [];
 
       if (status !== undefined) {
-        if (!["proses", "dikirim", "selesai"].includes(status)) {
+        if (!["pending", "proses", "dikirim", "selesai"].includes(status)) {
           return res.status(400).json({
             success: false,
-            error: "Status must be 'proses', 'dikirim', or 'selesai'",
+            error:
+              "Status must be 'pending', 'proses', 'dikirim', or 'selesai'",
           });
         }
         updateFields.push("status = ?");

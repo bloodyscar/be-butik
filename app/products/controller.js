@@ -76,7 +76,7 @@ module.exports = {
     try {
       // Get pagination parameters from query
       const page = parseInt(req.query.page) || 1;
-      const limit = 10; // Fixed limit of 10 per page
+      const limit = 4; // Fixed limit of 10 per page
       const offset = (page - 1) * limit;
 
       // Get total count for pagination info

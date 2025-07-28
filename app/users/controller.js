@@ -4,6 +4,12 @@ const db = require("../../config/database");
 const bcrypt = require("bcryptjs");
 const { generateToken } = require("../../config/jwt");
 
+// Email validation function
+const isValidEmail = (email) => {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(email);
+};
+
 module.exports = {
   createUsers: async function (req, res, next) {
     try {
@@ -14,6 +20,14 @@ module.exports = {
         return res.status(400).json({
           success: false,
           error: "All fields are required: name, email, phone, password, role",
+        });
+      }
+
+      // Validate email format
+      if (!isValidEmail(email)) {
+        return res.status(400).json({
+          success: false,
+          error: "Please provide a valid email address",
         });
       }
 
@@ -56,6 +70,14 @@ module.exports = {
         return res.status(400).json({
           success: false,
           error: "Email and password are required",
+        });
+      }
+
+      // Validate email format
+      if (!isValidEmail(email)) {
+        return res.status(400).json({
+          success: false,
+          error: "Please provide a valid email address",
         });
       }
 
