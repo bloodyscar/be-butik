@@ -88,7 +88,9 @@ module.exports = {
       // Get products with pagination
       // Note: Using string interpolation for LIMIT and OFFSET as MySQL doesn't support placeholders for these
       const [products] = await db.promisePool.execute(
-        `SELECT * FROM products ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`
+        `SELECT p.id,name,description,price,stock,image,created_at, ac.label, sc.label, sc.is_custom, sc.custom_value_cm FROM products p
+inner join age_categories ac ON  ac.id=p.age_category_id
+inner join size_categories sc ON  sc.id=p.size_category_id ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`
       );
 
       // Calculate pagination metadata
