@@ -145,9 +145,16 @@ module.exports = {
       let whereConditions = [];
       let queryParams = [];
 
-      if (user_id && !isNaN(user_id)) {
+      // Check user role - if not admin, only show their own orders
+      if (req.user.role !== 'admin') {
         whereConditions.push("o.user_id = ?");
-        queryParams.push(parseInt(user_id));
+        queryParams.push(req.user.id);
+      } else {
+        // Admin can filter by user_id if specified
+        if (user_id && !isNaN(user_id)) {
+          whereConditions.push("o.user_id = ?");
+          queryParams.push(parseInt(user_id));
+        }
       }
 
       if (
@@ -213,6 +220,7 @@ module.exports = {
             has_next: page < totalPages,
             has_prev: page > 1,
           },
+          user_role: req.user.role, // Include user role in response for frontend reference
         },
       });
     } catch (error) {
