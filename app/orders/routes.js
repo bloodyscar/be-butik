@@ -5,6 +5,8 @@ var {
   getAllOrders,
   deleteOrder,
   updateOrder,
+  updateTransferProof,
+  filterByStatus,
 } = require("./controller");
 const { uploadSingle } = require("../../config/multer");
 const { authenticateToken } = require("../../config/jwt");
@@ -16,8 +18,14 @@ router.post("/create", authenticateToken, uploadSingle, createOrder);
 /* GET all orders. */
 router.get("/", authenticateToken, getAllOrders);
 
+/* GET orders filtered by status. */
+router.get("/filter", authenticateToken, filterByStatus);
+
 /* PUT update order by ID. */
 router.put("/:id", authenticateToken, uploadSingle, updateOrder);
+
+/* PUT update transfer proof only by ID. */
+router.put("/:id/transfer-proof", authenticateToken, uploadSingle, updateTransferProof);
 
 /* DELETE order by ID. */
 router.delete("/:id", authenticateToken, deleteOrder);

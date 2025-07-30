@@ -5,6 +5,7 @@ var {
   getAllProduct,
   deleteProduct,
   updateProduct,
+  getDashboardStats,
 } = require("./controller");
 const { uploadSingle } = require("../../config/multer");
 var router = express.Router();
@@ -14,6 +15,9 @@ router.post("/create", uploadSingle, createProduct);
 
 /* GET all products. */
 router.get("/", getAllProduct);
+
+/* GET dashboard statistics. */
+router.get("/dashboard", getDashboardStats);
 
 /* PUT update product by ID. */
 router.put("/:id", uploadSingle, updateProduct);

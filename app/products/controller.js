@@ -7,17 +7,43 @@ const path = require("path");
 module.exports = {
   createProduct: async function (req, res, next) {
     try {
-      const {
+      var {
         name,
         description,
         price,
         stock,
         age_category_id,
         size_category_id,
+        size
       } = req.body;
 
       // Get uploaded file path (multer already processed in routes)
       const imagePath = req.file ? `images/${req.file.filename}` : null;
+
+      if(size_category_id == 0) {
+        // tambahkan size ke table size_categories
+        // Example: Insert new size into size_categories
+
+        // cek apakah size sudah ada di size_categories pada kolom custom_value_cm
+        const [existingSize] = await db.promisePool.execute(
+          "SELECT id FROM size_categories WHERE custom_value_cm = ?",
+          [size]
+        );
+
+        if (existingSize.length > 0) {
+          // Size already exists, use its ID
+          size_category_id = existingSize[0].id;
+        } else {
+          // Size does not exist, create a new one
+          const [result] = await db.promisePool.execute(
+            "INSERT INTO size_categories (label, is_custom, custom_value_cm) VALUES (?, ?, ?)",
+            [`Custom ${size} cm`, true, size]
+          );
+
+        console.log("New size category created with ID:", result.insertId);
+        size_category_id = result.insertId; // Update to new size category ID
+      }
+    }
 
       // Validate required fields
       if (!name || !price || !stock) {
@@ -44,8 +70,8 @@ module.exports = {
           price,
           stock,
           imagePath,
-          age_category_id || null,
-          size_category_id || null,
+          age_category_id,
+          size_category_id,
         ]
       );
 
@@ -146,30 +172,59 @@ inner join size_categories sc ON  sc.id=p.size_category_id ORDER BY created_at D
 
       const product = products[0];
 
-      // Delete the product from database
-      const [result] = await db.promisePool.execute(
-        "DELETE FROM products WHERE id = ?",
-        [productId]
-      );
+      // Start transaction to ensure data consistency
+      const connection = await db.promisePool.getConnection();
+      await connection.beginTransaction();
 
-      // If product had an image, try to delete the file
-      if (product.image) {
-        const imagePath = path.join("public", product.image);
-        fs.unlink(imagePath, (err) => {
-          if (err) {
-            console.log("Warning: Could not delete image file:", err.message);
-          }
+      try {
+        // Delete related records first to avoid foreign key constraint issues
+        
+        // 1. Delete from order_items table
+        const [orderItemsResult] = await connection.execute(
+          "DELETE FROM order_items WHERE product_id = ?",
+          [productId]
+        );
+        // 3. Add any other tables that reference this product
+        // Example: DELETE FROM wishlist WHERE product_id = ?
+        // Example: DELETE FROM product_reviews WHERE product_id = ?
+
+        // Finally, delete the product itself
+        const [result] = await connection.execute(
+          "DELETE FROM products WHERE id = ?",
+          [productId]
+        );
+
+        // Commit the transaction
+        await connection.commit();
+        connection.release();
+
+        // If product had an image, try to delete the file
+        if (product.image) {
+          const imagePath = path.join("public", product.image);
+          fs.unlink(imagePath, (err) => {
+            if (err) {
+              console.log("Warning: Could not delete image file:", err.message);
+            }
+          });
+        }
+
+        res.json({
+          success: true,
+          message: "Product and all related records deleted successfully",
+          data: {
+            deletedProductId: productId,
+            affectedRows: result.affectedRows,
+            deletedOrderItems: orderItemsResult.affectedRows,
+          },
         });
+
+      } catch (error) {
+        // Rollback transaction on error
+        await connection.rollback();
+        connection.release();
+        throw error;
       }
 
-      res.json({
-        success: true,
-        message: "Product deleted successfully",
-        data: {
-          deletedProductId: productId,
-          affectedRows: result.affectedRows,
-        },
-      });
     } catch (error) {
       console.error("Database delete error:", error);
       res.status(500).json({
@@ -182,13 +237,14 @@ inner join size_categories sc ON  sc.id=p.size_category_id ORDER BY created_at D
   updateProduct: async function (req, res, next) {
     try {
       const productId = req.params.id;
-      const {
+      var {
         name,
         description,
         price,
         stock,
         age_category_id,
         size_category_id,
+        size
       } = req.body;
 
       // Validate product ID
@@ -197,6 +253,55 @@ inner join size_categories sc ON  sc.id=p.size_category_id ORDER BY created_at D
           success: false,
           error: "Valid product ID is required",
         });
+      }
+
+      if(size_category_id == 0) {
+        // tambahkan size ke table size_categories
+        // Example: Insert new size into size_categories
+
+        // Validate that size is provided when size_category_id is 0
+        if (!size) {
+          return res.status(400).json({
+            success: false,
+            error: "Size value is required when size_category_id is 0",
+          });
+        }
+
+        // cek apakah size sudah ada di size_categories pada kolom custom_value_cm
+        const [existingSize] = await db.promisePool.execute(
+          "SELECT id FROM size_categories WHERE custom_value_cm = ?",
+          [size]
+        );
+
+        if (existingSize.length > 0) {
+          // Size already exists, use its ID
+          size_category_id = existingSize[0].id;
+          console.log("Using existing size category ID:", size_category_id);
+        } else {
+          // Size does not exist, create a new one
+          const [result] = await db.promisePool.execute(
+            "INSERT INTO size_categories (label, is_custom, custom_value_cm) VALUES (?, ?, ?)",
+            [`Custom ${size} cm`, true, size]
+          );
+
+          console.log("New size category created with ID:", result.insertId);
+          size_category_id = result.insertId; // Update to new size category ID
+        }
+      }
+
+      // Validate size_category_id exists if provided
+      if (size_category_id && size_category_id !== null && size_category_id !== 'null') {
+        const [validSize] = await db.promisePool.execute(
+          "SELECT id FROM size_categories WHERE id = ?",
+          [size_category_id]
+        );
+        
+        if (validSize.length === 0) {
+          return res.status(400).json({
+            success: false,
+            error: `Invalid size_category_id: ${size_category_id} does not exist in size_categories table`,
+          });
+        }
       }
 
       // Check if product exists and get current data
@@ -278,8 +383,14 @@ inner join size_categories sc ON  sc.id=p.size_category_id ORDER BY created_at D
       }
 
       if (size_category_id !== undefined) {
+        // Convert string 'null' to actual null
+        if (size_category_id === 'null' || size_category_id === '' || size_category_id === 0) {
+          size_category_id = null;
+        }
+        
+        console.log("Setting size_category_id to:", size_category_id);
         updateFields.push("size_category_id = ?");
-        updateValues.push(size_category_id || null);
+        updateValues.push(size_category_id);
       }
 
       // Always update image and updated_at
@@ -323,6 +434,50 @@ inner join size_categories sc ON  sc.id=p.size_category_id ORDER BY created_at D
       res.status(500).json({
         success: false,
         error: "Failed to update product",
+      });
+    }
+  },
+
+  getDashboardStats: async function (req, res, next) {
+    try {
+      // Get total products count
+      const [productCount] = await db.promisePool.execute(
+        "SELECT COUNT(*) as total_products FROM products"
+      );
+
+      // Get total orders count
+      const [orderCount] = await db.promisePool.execute(
+        "SELECT COUNT(*) as total_orders FROM orders"
+      );
+
+      // Get total users count
+      const [userCount] = await db.promisePool.execute(
+        "SELECT COUNT(*) as total_users FROM users WHERE role NOT IN ('admin', 'superadmin')"
+      );
+
+      // Get revenue from completed orders (status = 'selesai')
+      const [revenueResult] = await db.promisePool.execute(
+        "SELECT COALESCE(SUM(total_price), 0) as total_revenue FROM orders WHERE status = 'selesai'"
+      );
+
+      
+      res.json({
+        success: true,
+        data: {
+          summary: {
+            total_products: productCount[0].total_products,
+            total_orders: orderCount[0].total_orders,
+            total_users: userCount[0].total_users,
+            total_revenue: parseFloat(revenueResult[0].total_revenue || 0),
+          },
+          timestamp: new Date().toISOString(),
+        },
+      });
+    } catch (error) {
+      console.error("Dashboard stats error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to fetch dashboard statistics",
       });
     }
   },
