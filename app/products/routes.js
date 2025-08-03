@@ -6,6 +6,9 @@ var {
   deleteProduct,
   updateProduct,
   getDashboardStats,
+  filterProduct,
+  getAllAgeCategories,
+  getAllSizeCategories,
 } = require("./controller");
 const { uploadSingle } = require("../../config/multer");
 var router = express.Router();
@@ -17,7 +20,16 @@ router.post("/create", uploadSingle, createProduct);
 router.get("/", getAllProduct);
 
 /* GET dashboard statistics. */
-router.get("/dashboard", getDashboardStats);
+router.get("/dashboard/stats", getDashboardStats);
+
+/* GET filtered products by size and age categories. */
+router.get("/filter", filterProduct);
+
+/* GET all age categories. */
+router.get("/age-categories", getAllAgeCategories);
+
+/* GET all size categories. */
+router.get("/size-categories", getAllSizeCategories);
 
 /* PUT update product by ID. */
 router.put("/:id", uploadSingle, updateProduct);

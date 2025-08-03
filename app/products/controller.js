@@ -438,6 +438,169 @@ inner join size_categories sc ON  sc.id=p.size_category_id ORDER BY created_at D
     }
   },
 
+  filterProduct: async function (req, res, next) {
+    try {
+      // Get pagination parameters from query
+      const page = parseInt(req.query.page) || 1;
+      const limit = 4; // Fixed limit of 4 per page (same as getAllProduct)
+      const offset = (page - 1) * limit;
+
+      // Get filter parameters
+      const { size_label, age_label, search } = req.query;
+
+      // Build WHERE clause
+      let whereConditions = [];
+      let queryParams = [];
+
+      // Filter by size category label
+      if (size_label && size_label.trim() !== "") {
+        whereConditions.push("sc.label LIKE ?");
+        queryParams.push(`%${size_label.trim()}%`);
+      }
+
+      // Filter by age category label
+      if (age_label && age_label.trim() !== "") {
+        whereConditions.push("ac.label LIKE ?");
+        queryParams.push(`%${age_label.trim()}%`);
+      }
+
+      // Add search functionality for product name or description
+      if (search && search.trim() !== "") {
+        whereConditions.push("(p.name LIKE ? OR p.description LIKE ?)");
+        const searchTerm = `%${search.trim()}%`;
+        queryParams.push(searchTerm, searchTerm);
+      }
+
+      const whereClause = whereConditions.length > 0 
+        ? `WHERE ${whereConditions.join(" AND ")}`
+        : "";
+
+      // Get total count for pagination info
+      const [countResult] = await db.promisePool.execute(
+        `SELECT COUNT(*) as total 
+         FROM products p
+         INNER JOIN age_categories ac ON ac.id = p.age_category_id
+         INNER JOIN size_categories sc ON sc.id = p.size_category_id
+         ${whereClause}`,
+        queryParams
+      );
+      const totalProducts = countResult[0].total;
+
+      // Get filtered products with pagination
+      const [products] = await db.promisePool.execute(
+        `SELECT 
+          p.id,
+          p.name,
+          p.description,
+          p.price,
+          p.stock,
+          p.image,
+          p.created_at,
+          ac.label as age_range,
+          ac.id as age_category_id,
+          sc.label as size,
+          sc.id as size_category_id,
+          sc.is_custom,
+          sc.custom_value_cm
+         FROM products p
+         INNER JOIN age_categories ac ON ac.id = p.age_category_id
+         INNER JOIN size_categories sc ON sc.id = p.size_category_id
+         ${whereClause}
+         ORDER BY p.created_at DESC 
+         LIMIT ${limit} OFFSET ${offset}`,
+        queryParams
+      );
+
+      // Get available size categories for filter options
+      const [sizeCategories] = await db.promisePool.execute(
+        "SELECT DISTINCT label FROM size_categories ORDER BY label"
+      );
+
+      // Get available age categories for filter options
+      const [ageCategories] = await db.promisePool.execute(
+        "SELECT DISTINCT label FROM age_categories ORDER BY label"
+      );
+
+      // Calculate pagination metadata
+      const totalPages = Math.ceil(totalProducts / limit);
+
+      res.json({
+        success: true,
+        data: {
+          products,
+          pagination: {
+            current_page: page,
+            total_pages: totalPages,
+            total_products: totalProducts,
+            limit: limit,
+            has_next: page < totalPages,
+            has_prev: page > 1,
+          },
+          filters: {
+            applied: {
+              size_label: size_label || null,
+              age_label: age_label || null,
+              search: search || null,
+            },
+            available_options: {
+              size_categories: sizeCategories.map(item => item.label),
+              age_categories: ageCategories.map(item => item.label),
+            },
+          },
+        },
+      });
+    } catch (error) {
+      console.error("Database query error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to filter products",
+      });
+    }
+  },
+
+  getAllAgeCategories: async function (req, res, next) {
+    try {
+      // Get all age categories
+      const [ageCategories] = await db.promisePool.execute(
+        "SELECT id, label FROM age_categories ORDER BY id ASC"
+      );
+      res.json({
+        success: true,
+        data: {
+          age_categories: ageCategories,
+        },
+      });
+    } catch (error) {
+      console.error("Database query error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to fetch age categories",
+      });
+    }
+  },
+
+  getAllSizeCategories: async function (req, res, next) {
+    try {
+      // Get all size categories
+      const [sizeCategories] = await db.promisePool.execute(
+        "SELECT id, label, is_custom, custom_value_cm FROM size_categories ORDER BY id ASC"
+      );
+
+      res.json({
+        success: true,
+        data: {
+          size_categories: sizeCategories,
+        },
+      });
+    } catch (error) {
+      console.error("Database query error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to fetch size categories",
+      });
+    }
+  },
+
   getDashboardStats: async function (req, res, next) {
     try {
       // Get total products count
