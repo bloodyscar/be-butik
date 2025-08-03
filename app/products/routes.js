@@ -26,10 +26,10 @@ router.get("/dashboard/stats", getDashboardStats);
 router.get("/filter", filterProduct);
 
 /* GET all age categories. */
-router.get("/age-categories", getAllAgeCategories);
+router.get("/age-category", getAllAgeCategories);
 
 /* GET all size categories. */
-router.get("/size-categories", getAllSizeCategories);
+router.get("/size-category", getAllSizeCategories);
 
 /* PUT update product by ID. */
 router.put("/:id", uploadSingle, updateProduct);

@@ -560,6 +560,7 @@ inner join size_categories sc ON  sc.id=p.size_category_id ORDER BY created_at D
 
   getAllAgeCategories: async function (req, res, next) {
     try {
+      console.log("Fetching all age categories...");
       // Get all age categories
       const [ageCategories] = await db.promisePool.execute(
         "SELECT id, label FROM age_categories ORDER BY id ASC"
@@ -581,6 +582,7 @@ inner join size_categories sc ON  sc.id=p.size_category_id ORDER BY created_at D
 
   getAllSizeCategories: async function (req, res, next) {
     try {
+      console.log("Fetching all size categories...");
       // Get all size categories
       const [sizeCategories] = await db.promisePool.execute(
         "SELECT id, label, is_custom, custom_value_cm FROM size_categories ORDER BY id ASC"
