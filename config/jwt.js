@@ -3,7 +3,7 @@ const jwt = require("jsonwebtoken");
 // JWT secret key - in production, use environment variable
 const JWT_SECRET =
   process.env.JWT_SECRET || "your-secret-key-change-this-in-production";
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "24h";
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "365d";
 
 // Generate JWT token
 const generateToken = (payload) => {

@@ -7,6 +7,7 @@ var {
   updateOrder,
   updateTransferProof,
   filterByStatus,
+  getSalesReport,
 } = require("./controller");
 const { uploadSingle } = require("../../config/multer");
 const { authenticateToken } = require("../../config/jwt");
@@ -20,6 +21,9 @@ router.get("/", authenticateToken, getAllOrders);
 
 /* GET orders filtered by status. */
 router.get("/filter", authenticateToken, filterByStatus);
+
+/* GET sales reports (daily, weekly, monthly). */
+router.get("/reports/sales", authenticateToken, getSalesReport);
 
 /* PUT update order by ID. */
 router.put("/:id", authenticateToken, uploadSingle, updateOrder);

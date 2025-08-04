@@ -737,4 +737,363 @@ module.exports = {
       });
     }
   },
+
+  getSalesReport: async function (req, res, next) {
+    try {
+      const { start_date, end_date, query } = req.query;
+
+      // Set date range if not provided
+      let dateRange = {};
+      const now = new Date();
+      
+      if (start_date && end_date) {
+        dateRange.start = start_date;
+        dateRange.end = end_date;
+      } else {
+        // Default to last 12 months for comprehensive view
+        dateRange.start = new Date(now.getFullYear() - 1, now.getMonth(), 1).toISOString().split('T')[0];
+        dateRange.end = now.toISOString().split('T')[0];
+      }
+
+      // Build filter conditions for products
+      let productWhereConditions = [];
+      let productParams = [dateRange.start, dateRange.end];
+
+      // Universal search query (searches across name, age_label, size_label)
+      if (query && query.trim() !== '') {
+        productWhereConditions.push(
+          "(p.name LIKE ? OR ac.label LIKE ? OR sc.label LIKE ?)"
+        );
+        const searchTerm = `%${query.trim()}%`;
+        productParams.push(searchTerm, searchTerm, searchTerm);
+      }
+
+      const productWhereClause = productWhereConditions.length > 0 
+        ? `AND (${productWhereConditions.join(" AND ")})` 
+        : "";
+
+      // Get overall summary for the period (with optional product filtering)
+      let overallSummaryQuery, overallParams;
+      
+      if (productWhereConditions.length > 0) {
+        // Use product-specific filtering via order_items
+        overallSummaryQuery = `SELECT 
+          COUNT(DISTINCT o.id) as total_orders,
+          COUNT(DISTINCT CASE WHEN o.status = 'selesai' THEN o.id END) as completed_orders,
+          COUNT(DISTINCT CASE WHEN o.status = 'dibatalkan' THEN o.id END) as cancelled_orders,
+          COALESCE(SUM(CASE WHEN o.status = 'selesai' THEN oi.quantity * oi.unit_price ELSE 0 END), 0) as total_revenue,
+          COALESCE(AVG(CASE WHEN o.status = 'selesai' THEN oi.quantity * oi.unit_price ELSE NULL END), 0) as avg_order_value,
+          COUNT(DISTINCT CASE WHEN o.status = 'selesai' THEN o.user_id END) as unique_customers
+        FROM order_items oi
+        INNER JOIN orders o ON oi.order_id = o.id
+        INNER JOIN products p ON oi.product_id = p.id
+        LEFT JOIN age_categories ac ON p.age_category_id = ac.id
+        LEFT JOIN size_categories sc ON p.size_category_id = sc.id
+        WHERE DATE(o.created_at) BETWEEN ? AND ?
+        ${productWhereClause}`;
+        overallParams = productParams;
+      } else {
+        // Use regular order-based summary
+        overallSummaryQuery = `SELECT 
+          COUNT(o.id) as total_orders,
+          COUNT(CASE WHEN o.status = 'selesai' THEN 1 END) as completed_orders,
+          COUNT(CASE WHEN o.status = 'dibatalkan' THEN 1 END) as cancelled_orders,
+          COALESCE(SUM(CASE WHEN o.status = 'selesai' THEN (o.total_price - COALESCE(o.shipping_cost, 0)) ELSE 0 END), 0) as total_revenue,
+          COALESCE(AVG(CASE WHEN o.status = 'selesai' THEN (o.total_price - COALESCE(o.shipping_cost, 0)) ELSE NULL END), 0) as avg_order_value,
+          COUNT(DISTINCT CASE WHEN o.status = 'selesai' THEN o.user_id END) as unique_customers
+        FROM orders o
+        WHERE DATE(o.created_at) BETWEEN ? AND ?`;
+        overallParams = [dateRange.start, dateRange.end];
+      }
+
+      const [overallSummary] = await db.promisePool.execute(overallSummaryQuery, overallParams);
+
+      // Get DAILY sales data (with optional product filtering)
+      let dailySalesQuery, dailyParams;
+      
+      if (productWhereConditions.length > 0) {
+        dailySalesQuery = `SELECT 
+          DATE(o.created_at) as period,
+          COUNT(DISTINCT o.id) as total_orders,
+          COUNT(DISTINCT CASE WHEN o.status = 'selesai' THEN o.id END) as completed_orders,
+          COUNT(DISTINCT CASE WHEN o.status = 'dibatalkan' THEN o.id END) as cancelled_orders,
+          COALESCE(SUM(CASE WHEN o.status = 'selesai' THEN oi.quantity * oi.unit_price ELSE 0 END), 0) as total_revenue,
+          COALESCE(AVG(CASE WHEN o.status = 'selesai' THEN oi.quantity * oi.unit_price ELSE NULL END), 0) as avg_order_value,
+          COUNT(DISTINCT CASE WHEN o.status = 'selesai' THEN o.user_id END) as unique_customers,
+          COALESCE(SUM(CASE WHEN o.status = 'selesai' THEN oi.quantity ELSE 0 END), 0) as total_products
+        FROM order_items oi
+        INNER JOIN orders o ON oi.order_id = o.id
+        INNER JOIN products p ON oi.product_id = p.id
+        LEFT JOIN age_categories ac ON p.age_category_id = ac.id
+        LEFT JOIN size_categories sc ON p.size_category_id = sc.id
+        WHERE DATE(o.created_at) BETWEEN ? AND ?
+        ${productWhereClause}
+        GROUP BY DATE(o.created_at)
+        ORDER BY period DESC
+        LIMIT 30`;
+        dailyParams = productParams;
+      } else {
+        dailySalesQuery = `SELECT 
+          DATE(o.created_at) as period,
+          COUNT(o.id) as total_orders,
+          COUNT(CASE WHEN o.status = 'selesai' THEN 1 END) as completed_orders,
+          COUNT(CASE WHEN o.status = 'dibatalkan' THEN 1 END) as cancelled_orders,
+          COALESCE(SUM(CASE WHEN o.status = 'selesai' THEN (o.total_price - COALESCE(o.shipping_cost, 0)) ELSE 0 END), 0) as total_revenue,
+          COALESCE(AVG(CASE WHEN o.status = 'selesai' THEN (o.total_price - COALESCE(o.shipping_cost, 0)) ELSE NULL END), 0) as avg_order_value,
+          COUNT(DISTINCT CASE WHEN o.status = 'selesai' THEN o.user_id END) as unique_customers,
+          COALESCE(SUM(CASE WHEN o.status = 'selesai' THEN (
+            SELECT SUM(oi2.quantity) 
+            FROM order_items oi2 
+            WHERE oi2.order_id = o.id
+          ) ELSE 0 END), 0) as total_products
+        FROM orders o
+        WHERE DATE(o.created_at) BETWEEN ? AND ?
+        GROUP BY DATE(o.created_at)
+        ORDER BY period DESC
+        LIMIT 30`;
+        dailyParams = [dateRange.start, dateRange.end];
+      }
+
+      const [dailySalesData] = await db.promisePool.execute(dailySalesQuery, dailyParams);
+
+      // Get WEEKLY sales data (with optional product filtering)
+      let weeklySalesQuery, weeklyParams;
+      
+      if (productWhereConditions.length > 0) {
+        weeklySalesQuery = `SELECT 
+          CONCAT(YEAR(o.created_at), '-W', LPAD(WEEK(o.created_at, 1), 2, '0')) as period,
+          COUNT(DISTINCT o.id) as total_orders,
+          COUNT(DISTINCT CASE WHEN o.status = 'selesai' THEN o.id END) as completed_orders,
+          COUNT(DISTINCT CASE WHEN o.status = 'dibatalkan' THEN o.id END) as cancelled_orders,
+          COALESCE(SUM(CASE WHEN o.status = 'selesai' THEN oi.quantity * oi.unit_price ELSE 0 END), 0) as total_revenue,
+          COALESCE(AVG(CASE WHEN o.status = 'selesai' THEN oi.quantity * oi.unit_price ELSE NULL END), 0) as avg_order_value,
+          COUNT(DISTINCT CASE WHEN o.status = 'selesai' THEN o.user_id END) as unique_customers,
+          COALESCE(SUM(CASE WHEN o.status = 'selesai' THEN oi.quantity ELSE 0 END), 0) as total_products
+        FROM order_items oi
+        INNER JOIN orders o ON oi.order_id = o.id
+        INNER JOIN products p ON oi.product_id = p.id
+        LEFT JOIN age_categories ac ON p.age_category_id = ac.id
+        LEFT JOIN size_categories sc ON p.size_category_id = sc.id
+        WHERE DATE(o.created_at) BETWEEN ? AND ?
+        ${productWhereClause}
+        GROUP BY YEAR(o.created_at), WEEK(o.created_at, 1), CONCAT(YEAR(o.created_at), '-W', LPAD(WEEK(o.created_at, 1), 2, '0'))
+        ORDER BY period DESC
+        LIMIT 12`;
+        weeklyParams = productParams;
+      } else {
+        weeklySalesQuery = `SELECT 
+          CONCAT(YEAR(o.created_at), '-W', LPAD(WEEK(o.created_at, 1), 2, '0')) as period,
+          COUNT(o.id) as total_orders,
+          COUNT(CASE WHEN o.status = 'selesai' THEN 1 END) as completed_orders,
+          COUNT(CASE WHEN o.status = 'dibatalkan' THEN 1 END) as cancelled_orders,
+          COALESCE(SUM(CASE WHEN o.status = 'selesai' THEN (o.total_price - COALESCE(o.shipping_cost, 0)) ELSE 0 END), 0) as total_revenue,
+          COALESCE(AVG(CASE WHEN o.status = 'selesai' THEN (o.total_price - COALESCE(o.shipping_cost, 0)) ELSE NULL END), 0) as avg_order_value,
+          COUNT(DISTINCT CASE WHEN o.status = 'selesai' THEN o.user_id END) as unique_customers,
+          COALESCE(SUM(CASE WHEN o.status = 'selesai' THEN (
+            SELECT SUM(oi2.quantity) 
+            FROM order_items oi2 
+            WHERE oi2.order_id = o.id
+          ) ELSE 0 END), 0) as total_products
+        FROM orders o
+        WHERE DATE(o.created_at) BETWEEN ? AND ?
+        GROUP BY YEAR(o.created_at), WEEK(o.created_at, 1), CONCAT(YEAR(o.created_at), '-W', LPAD(WEEK(o.created_at, 1), 2, '0'))
+        ORDER BY period DESC
+        LIMIT 12`;
+        weeklyParams = [dateRange.start, dateRange.end];
+      }
+
+      const [weeklySalesData] = await db.promisePool.execute(weeklySalesQuery, weeklyParams);
+
+      // Get MONTHLY sales data (with optional product filtering)
+      let monthlySalesQuery, monthlyParams;
+      
+      if (productWhereConditions.length > 0) {
+        monthlySalesQuery = `SELECT 
+          DATE_FORMAT(o.created_at, '%Y-%m') as period,
+          COUNT(DISTINCT o.id) as total_orders,
+          COUNT(DISTINCT CASE WHEN o.status = 'selesai' THEN o.id END) as completed_orders,
+          COUNT(DISTINCT CASE WHEN o.status = 'dibatalkan' THEN o.id END) as cancelled_orders,
+          COALESCE(SUM(CASE WHEN o.status = 'selesai' THEN oi.quantity * oi.unit_price ELSE 0 END), 0) as total_revenue,
+          COALESCE(AVG(CASE WHEN o.status = 'selesai' THEN oi.quantity * oi.unit_price ELSE NULL END), 0) as avg_order_value,
+          COUNT(DISTINCT CASE WHEN o.status = 'selesai' THEN o.user_id END) as unique_customers,
+          COALESCE(SUM(CASE WHEN o.status = 'selesai' THEN oi.quantity ELSE 0 END), 0) as total_products
+        FROM order_items oi
+        INNER JOIN orders o ON oi.order_id = o.id
+        INNER JOIN products p ON oi.product_id = p.id
+        LEFT JOIN age_categories ac ON p.age_category_id = ac.id
+        LEFT JOIN size_categories sc ON p.size_category_id = sc.id
+        WHERE DATE(o.created_at) BETWEEN ? AND ?
+        ${productWhereClause}
+        GROUP BY DATE_FORMAT(o.created_at, '%Y-%m')
+        ORDER BY period DESC
+        LIMIT 12`;
+        monthlyParams = productParams;
+      } else {
+        monthlySalesQuery = `SELECT 
+          DATE_FORMAT(o.created_at, '%Y-%m') as period,
+          COUNT(o.id) as total_orders,
+          COUNT(CASE WHEN o.status = 'selesai' THEN 1 END) as completed_orders,
+          COUNT(CASE WHEN o.status = 'dibatalkan' THEN 1 END) as cancelled_orders,
+          COALESCE(SUM(CASE WHEN o.status = 'selesai' THEN (o.total_price - COALESCE(o.shipping_cost, 0)) ELSE 0 END), 0) as total_revenue,
+          COALESCE(AVG(CASE WHEN o.status = 'selesai' THEN (o.total_price - COALESCE(o.shipping_cost, 0)) ELSE NULL END), 0) as avg_order_value,
+          COUNT(DISTINCT CASE WHEN o.status = 'selesai' THEN o.user_id END) as unique_customers,
+          COALESCE(SUM(CASE WHEN o.status = 'selesai' THEN (
+            SELECT SUM(oi2.quantity) 
+            FROM order_items oi2 
+            WHERE oi2.order_id = o.id
+          ) ELSE 0 END), 0) as total_products
+        FROM orders o
+        WHERE DATE(o.created_at) BETWEEN ? AND ?
+        GROUP BY DATE_FORMAT(o.created_at, '%Y-%m')
+        ORDER BY period DESC
+        LIMIT 12`;
+        monthlyParams = [dateRange.start, dateRange.end];
+      }
+
+      const [monthlySalesData] = await db.promisePool.execute(monthlySalesQuery, monthlyParams);
+
+      // Get top-selling products for the period (with optional filtering)
+      const [topProducts] = await db.promisePool.execute(
+        `SELECT 
+          p.id,
+          p.name,
+          p.price,
+          p.image,
+          ac.label as age_label,
+          sc.label as size_label,
+          SUM(oi.quantity) as total_sold,
+          COUNT(DISTINCT o.id) as order_count,
+          SUM(oi.quantity * oi.unit_price) as product_revenue
+        FROM order_items oi
+        INNER JOIN orders o ON oi.order_id = o.id
+        INNER JOIN products p ON oi.product_id = p.id
+        LEFT JOIN age_categories ac ON p.age_category_id = ac.id
+        LEFT JOIN size_categories sc ON p.size_category_id = sc.id
+        WHERE o.status = 'selesai' 
+        AND DATE(o.created_at) BETWEEN ? AND ?
+        ${productWhereClause}
+        GROUP BY p.id, p.name, p.price, p.image, ac.label, sc.label
+        ORDER BY total_sold DESC
+        LIMIT 10`,
+        productParams
+      );
+
+      // Get customer insights (with optional product filtering)
+      let customerInsightsQuery, customerParams;
+      
+      if (productWhereConditions.length > 0) {
+        customerInsightsQuery = `SELECT 
+          u.id,
+          u.name,
+          u.email,
+          COUNT(DISTINCT o.id) as total_orders,
+          SUM(oi.quantity * oi.unit_price) as total_spent
+        FROM users u
+        INNER JOIN orders o ON u.id = o.user_id
+        INNER JOIN order_items oi ON o.id = oi.order_id
+        INNER JOIN products p ON oi.product_id = p.id
+        LEFT JOIN age_categories ac ON p.age_category_id = ac.id
+        LEFT JOIN size_categories sc ON p.size_category_id = sc.id
+        WHERE o.status = 'selesai'
+        AND DATE(o.created_at) BETWEEN ? AND ?
+        ${productWhereClause}
+        GROUP BY u.id, u.name, u.email
+        ORDER BY total_spent DESC
+        LIMIT 10`;
+        customerParams = productParams;
+      } else {
+        customerInsightsQuery = `SELECT 
+          u.id,
+          u.name,
+          u.email,
+          COUNT(o.id) as total_orders,
+          SUM(CASE WHEN o.status = 'selesai' THEN (o.total_price - COALESCE(o.shipping_cost, 0)) ELSE 0 END) as total_spent
+        FROM users u
+        INNER JOIN orders o ON u.id = o.user_id
+        WHERE o.status = 'selesai'
+        AND DATE(o.created_at) BETWEEN ? AND ?
+        GROUP BY u.id, u.name, u.email
+        ORDER BY total_spent DESC
+        LIMIT 10`;
+        customerParams = [dateRange.start, dateRange.end];
+      }
+
+      const [customerInsights] = await db.promisePool.execute(customerInsightsQuery, customerParams);
+
+      // Helper function to format sales data
+      const formatSalesData = (data) => {
+        return data.map(item => ({
+          ...item,
+          total_revenue: parseFloat(item.total_revenue),
+          avg_order_value: parseFloat(item.avg_order_value),
+          conversion_rate: item.total_orders > 0 
+            ? ((item.completed_orders / item.total_orders) * 100).toFixed(2)
+            : 0,
+        }));
+      };
+
+      res.json({
+        success: true,
+        data: {
+          report_info: {
+            date_range: {
+              start: dateRange.start,
+              end: dateRange.end,
+            },
+            filters_applied: {
+              universal_query: query || null,
+            },
+            generated_at: new Date().toISOString(),
+            description: productWhereConditions.length > 0 
+              ? "Filtered sales report with product-specific criteria" 
+              : "Comprehensive sales report with daily, weekly, and monthly breakdowns",
+          },
+          overall_summary: {
+            ...overallSummary[0],
+            total_revenue: parseFloat(overallSummary[0].total_revenue),
+            avg_order_value: parseFloat(overallSummary[0].avg_order_value),
+            conversion_rate: overallSummary[0].total_orders > 0 
+              ? ((overallSummary[0].completed_orders / overallSummary[0].total_orders) * 100).toFixed(2)
+              : 0,
+          },
+          daily_sales: {
+            description: productWhereConditions.length > 0 
+              ? "Last 30 days sales data for filtered products" 
+              : "Last 30 days sales data",
+            data: formatSalesData(dailySalesData),
+            total_records: dailySalesData.length,
+          },
+          weekly_sales: {
+            description: productWhereConditions.length > 0 
+              ? "Last 12 weeks sales data for filtered products" 
+              : "Last 12 weeks sales data",
+            data: formatSalesData(weeklySalesData),
+            total_records: weeklySalesData.length,
+          },
+          monthly_sales: {
+            description: productWhereConditions.length > 0 
+              ? "Last 12 months sales data for filtered products" 
+              : "Last 12 months sales data",
+            data: formatSalesData(monthlySalesData),
+            total_records: monthlySalesData.length,
+          },
+          top_products: topProducts.map(product => ({
+            ...product,
+            price: parseFloat(product.price),
+            product_revenue: parseFloat(product.product_revenue),
+          })),
+          top_customers: customerInsights.map(customer => ({
+            ...customer,
+            total_spent: parseFloat(customer.total_spent),
+          })),
+        },
+      });
+    } catch (error) {
+      console.error("Sales report error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to generate sales report",
+      });
+    }
+  },
 };

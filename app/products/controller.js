@@ -565,6 +565,104 @@ inner join size_categories sc ON  sc.id=p.size_category_id ORDER BY created_at D
     }
   },
 
+  searchProduct: async function (req, res, next) {
+    try {
+      // Get pagination parameters from query
+      const page = parseInt(req.query.page) || 1;
+      const limit = 4; // Fixed limit of 4 per page (same as getAllProduct)
+      const offset = (page - 1) * limit;
+
+      // Get search query
+      const { q } = req.query; // Using 'q' as the search parameter
+
+      // Validate search query
+      if (!q || q.trim() === "") {
+        return res.status(400).json({
+          success: false,
+          error: "Search query 'q' is required",
+        });
+      }
+
+      const searchTerm = `%${q.trim()}%`;
+
+      // Build WHERE clause for universal search
+      const whereClause = `WHERE (
+        p.name LIKE ? OR 
+        p.price LIKE ? OR 
+        ac.label LIKE ? OR 
+        sc.label LIKE ?
+      )`;
+
+      // Query parameters for the search (same search term for all fields)
+      const queryParams = [searchTerm, searchTerm, searchTerm, searchTerm];
+
+      // Get total count for pagination info
+      const [countResult] = await db.promisePool.execute(
+        `SELECT COUNT(*) as total 
+         FROM products p
+         INNER JOIN age_categories ac ON ac.id = p.age_category_id
+         INNER JOIN size_categories sc ON sc.id = p.size_category_id
+         ${whereClause}`,
+        queryParams
+      );
+      const totalProducts = countResult[0].total;
+
+      // Get search results with pagination
+      const [products] = await db.promisePool.execute(
+        `SELECT 
+          p.id,
+          p.name,
+          p.description,
+          p.price,
+          p.stock,
+          p.image,
+          p.created_at,
+          ac.label as age_range,
+          ac.id as age_category_id,
+          sc.label as size,
+          sc.id as size_category_id,
+          sc.is_custom,
+          sc.custom_value_cm
+         FROM products p
+         INNER JOIN age_categories ac ON ac.id = p.age_category_id
+         INNER JOIN size_categories sc ON sc.id = p.size_category_id
+         ${whereClause}
+         ORDER BY p.created_at DESC 
+         LIMIT ${limit} OFFSET ${offset}`,
+        [...queryParams]
+      );
+
+      // Calculate pagination metadata
+      const totalPages = Math.ceil(totalProducts / limit);
+
+      res.json({
+        success: true,
+        data: {
+          products,
+          pagination: {
+            current_page: page,
+            total_pages: totalPages,
+            total_products: totalProducts,
+            limit: limit,
+            has_next: page < totalPages,
+            has_prev: page > 1,
+          },
+          search: {
+            query: q,
+            searched_fields: ["name", "price", "age_label", "size_label"],
+            results_found: totalProducts,
+          },
+        },
+      });
+    } catch (error) {
+      console.error("Database search error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to search products",
+      });
+    }
+  },
+
   getAllAgeCategories: async function (req, res, next) {
     try {
       console.log("Fetching all age categories...");
@@ -846,7 +944,7 @@ inner join size_categories sc ON  sc.id=p.size_category_id ORDER BY created_at D
 
       // Get revenue from completed orders (status = 'selesai')
       const [revenueResult] = await db.promisePool.execute(
-        "SELECT COALESCE(SUM(total_price), 0) as total_revenue FROM orders WHERE status = 'selesai'"
+        "SELECT COALESCE(SUM(total_price - COALESCE(shipping_cost, 0)), 0) as total_revenue FROM orders WHERE status = 'selesai'"
       );
 
       res.json({

@@ -35,6 +35,9 @@ router.get("/age-category", getAllAgeCategories);
 /* GET all size categories. */
 router.get("/size-category", getAllSizeCategories);
 
+/* GET search products universally. */
+router.get("/search", searchProduct);
+
 /* PUT update product by ID. */
 router.put("/:id", uploadSingle, updateProduct);
 
