@@ -26,8 +26,6 @@ router.get("/dashboard/stats", getDashboardStats);
 /* GET filtered products by size and age categories. */
 router.get("/filter", filterProduct);
 
-/* GET search products by multiple criteria. */
-router.get("/search", searchProduct);
 
 /* GET all age categories. */
 router.get("/age-category", getAllAgeCategories);
