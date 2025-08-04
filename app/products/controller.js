@@ -14,13 +14,13 @@ module.exports = {
         stock,
         age_category_id,
         size_category_id,
-        size
+        size,
       } = req.body;
 
       // Get uploaded file path (multer already processed in routes)
       const imagePath = req.file ? `images/${req.file.filename}` : null;
 
-      if(size_category_id == 0) {
+      if (size_category_id == 0) {
         // tambahkan size ke table size_categories
         // Example: Insert new size into size_categories
 
@@ -40,10 +40,10 @@ module.exports = {
             [`Custom ${size} cm`, true, size]
           );
 
-        console.log("New size category created with ID:", result.insertId);
-        size_category_id = result.insertId; // Update to new size category ID
+          console.log("New size category created with ID:", result.insertId);
+          size_category_id = result.insertId; // Update to new size category ID
+        }
       }
-    }
 
       // Validate required fields
       if (!name || !price || !stock) {
@@ -178,7 +178,7 @@ inner join size_categories sc ON  sc.id=p.size_category_id ORDER BY created_at D
 
       try {
         // Delete related records first to avoid foreign key constraint issues
-        
+
         // 1. Delete from order_items table
         const [orderItemsResult] = await connection.execute(
           "DELETE FROM order_items WHERE product_id = ?",
@@ -217,14 +217,12 @@ inner join size_categories sc ON  sc.id=p.size_category_id ORDER BY created_at D
             deletedOrderItems: orderItemsResult.affectedRows,
           },
         });
-
       } catch (error) {
         // Rollback transaction on error
         await connection.rollback();
         connection.release();
         throw error;
       }
-
     } catch (error) {
       console.error("Database delete error:", error);
       res.status(500).json({
@@ -244,7 +242,7 @@ inner join size_categories sc ON  sc.id=p.size_category_id ORDER BY created_at D
         stock,
         age_category_id,
         size_category_id,
-        size
+        size,
       } = req.body;
 
       // Validate product ID
@@ -255,7 +253,7 @@ inner join size_categories sc ON  sc.id=p.size_category_id ORDER BY created_at D
         });
       }
 
-      if(size_category_id == 0) {
+      if (size_category_id == 0) {
         // tambahkan size ke table size_categories
         // Example: Insert new size into size_categories
 
@@ -290,12 +288,16 @@ inner join size_categories sc ON  sc.id=p.size_category_id ORDER BY created_at D
       }
 
       // Validate size_category_id exists if provided
-      if (size_category_id && size_category_id !== null && size_category_id !== 'null') {
+      if (
+        size_category_id &&
+        size_category_id !== null &&
+        size_category_id !== "null"
+      ) {
         const [validSize] = await db.promisePool.execute(
           "SELECT id FROM size_categories WHERE id = ?",
           [size_category_id]
         );
-        
+
         if (validSize.length === 0) {
           return res.status(400).json({
             success: false,
@@ -384,10 +386,14 @@ inner join size_categories sc ON  sc.id=p.size_category_id ORDER BY created_at D
 
       if (size_category_id !== undefined) {
         // Convert string 'null' to actual null
-        if (size_category_id === 'null' || size_category_id === '' || size_category_id === 0) {
+        if (
+          size_category_id === "null" ||
+          size_category_id === "" ||
+          size_category_id === 0
+        ) {
           size_category_id = null;
         }
-        
+
         console.log("Setting size_category_id to:", size_category_id);
         updateFields.push("size_category_id = ?");
         updateValues.push(size_category_id);
@@ -471,9 +477,10 @@ inner join size_categories sc ON  sc.id=p.size_category_id ORDER BY created_at D
         queryParams.push(searchTerm, searchTerm);
       }
 
-      const whereClause = whereConditions.length > 0 
-        ? `WHERE ${whereConditions.join(" AND ")}`
-        : "";
+      const whereClause =
+        whereConditions.length > 0
+          ? `WHERE ${whereConditions.join(" AND ")}`
+          : "";
 
       // Get total count for pagination info
       const [countResult] = await db.promisePool.execute(
@@ -543,8 +550,8 @@ inner join size_categories sc ON  sc.id=p.size_category_id ORDER BY created_at D
               search: search || null,
             },
             available_options: {
-              size_categories: sizeCategories.map(item => item.label),
-              age_categories: ageCategories.map(item => item.label),
+              size_categories: sizeCategories.map((item) => item.label),
+              age_categories: ageCategories.map((item) => item.label),
             },
           },
         },
@@ -603,6 +610,223 @@ inner join size_categories sc ON  sc.id=p.size_category_id ORDER BY created_at D
     }
   },
 
+  searchProduct: async function (req, res, next) {
+    try {
+      // Get pagination parameters from query
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 4; // Allow custom limit
+      const offset = (page - 1) * limit;
+
+      // Get search parameters
+      const {
+        name,
+        description,
+        price,
+        min_stock,
+        max_stock,
+        age_category_id,
+        size_category_id,
+        age_label,
+        size_label,
+        min_month,
+        max_month,
+        custom_value_cm,
+        is_custom,
+        sort_by,
+        sort_order,
+      } = req.query;
+
+      // Build WHERE clause
+      let whereConditions = [];
+      let queryParams = [];
+
+      // Search by product name (partial match)
+      if (name && name.trim() !== "") {
+        whereConditions.push("p.name LIKE ?");
+        queryParams.push(`%${name.trim()}%`);
+      }
+
+      // Search by product description (partial match)
+      if (description && description.trim() !== "") {
+        whereConditions.push("p.description LIKE ?");
+        queryParams.push(`%${description.trim()}%`);
+      }
+
+      // Search by price range
+      if (price && !isNaN(price)) {
+        whereConditions.push("p.price = ?");
+        queryParams.push(parseInt(price));
+      }
+
+      // Search by stock range
+      if (min_stock && !isNaN(min_stock)) {
+        whereConditions.push("p.stock >= ?");
+        queryParams.push(parseInt(min_stock));
+      }
+
+      if (max_stock && !isNaN(max_stock)) {
+        whereConditions.push("p.stock <= ?");
+        queryParams.push(parseInt(max_stock));
+      }
+
+      // Search by age category ID
+      if (age_category_id && !isNaN(age_category_id)) {
+        whereConditions.push("p.age_category_id = ?");
+        queryParams.push(parseInt(age_category_id));
+      }
+
+      // Search by age category label
+      if (age_label && age_label.trim() !== "") {
+        whereConditions.push("ac.label LIKE ?");
+        queryParams.push(`%${age_label.trim()}%`);
+      }
+
+      // Search by age month range
+      if (min_month && !isNaN(min_month)) {
+        whereConditions.push("ac.min_month >= ?");
+        queryParams.push(parseInt(min_month));
+      }
+
+      if (max_month && !isNaN(max_month)) {
+        whereConditions.push("ac.max_month <= ?");
+        queryParams.push(parseInt(max_month));
+      }
+
+      // Search by size category ID
+      if (size_category_id && !isNaN(size_category_id)) {
+        whereConditions.push("p.size_category_id = ?");
+        queryParams.push(parseInt(size_category_id));
+      }
+
+      // Search by size category label
+      if (size_label && size_label.trim() !== "") {
+        whereConditions.push("sc.label LIKE ?");
+        queryParams.push(`%${size_label.trim()}%`);
+      }
+
+      // Search by custom size value
+      if (custom_value_cm && !isNaN(custom_value_cm)) {
+        whereConditions.push("sc.custom_value_cm = ?");
+        queryParams.push(parseInt(custom_value_cm));
+      }
+
+      // Search by custom/standard size categories
+      if (is_custom !== undefined) {
+        const isCustomBool = is_custom === "true" || is_custom === "1";
+        whereConditions.push("sc.is_custom = ?");
+        queryParams.push(isCustomBool ? 1 : 0);
+      }
+
+      const whereClause =
+        whereConditions.length > 0
+          ? `WHERE ${whereConditions.join(" AND ")}`
+          : "";
+
+      // Build ORDER BY clause
+      let orderClause = "ORDER BY p.created_at DESC"; // Default sorting
+      const validSortFields = {
+        name: "p.name",
+        price: "p.price",
+        stock: "p.stock",
+        created_at: "p.created_at",
+        updated_at: "p.updated_at",
+        age_label: "ac.label",
+        size_label: "sc.label",
+      };
+
+      if (sort_by && validSortFields[sort_by]) {
+        const order =
+          sort_order && sort_order.toLowerCase() === "desc" ? "DESC" : "ASC";
+        orderClause = `ORDER BY ${validSortFields[sort_by]} ${order}`;
+      }
+
+      // Get total count for pagination info
+      const [countResult] = await db.promisePool.execute(
+        `SELECT COUNT(*) as total 
+         FROM products p
+         LEFT JOIN age_categories ac ON ac.id = p.age_category_id
+         LEFT JOIN size_categories sc ON sc.id = p.size_category_id
+         ${whereClause}`,
+        queryParams
+      );
+      const totalProducts = countResult[0].total;
+
+      // Get search results with pagination
+      const [products] = await db.promisePool.execute(
+        `SELECT 
+          p.id,
+          p.name,
+          p.description,
+          p.price,
+          p.stock,
+          p.image,
+          p.created_at,
+          p.updated_at,
+          p.age_category_id,
+          p.size_category_id,
+          ac.label as age_category_label,
+          ac.min_month,
+          ac.max_month,
+          sc.label as size_category_label,
+          sc.is_custom,
+          sc.custom_value_cm
+         FROM products p
+         LEFT JOIN age_categories ac ON ac.id = p.age_category_id
+         LEFT JOIN size_categories sc ON sc.id = p.size_category_id
+         ${whereClause}
+         ${orderClause}
+         LIMIT ${limit} OFFSET ${offset}`,
+        queryParams
+      );
+
+      // Calculate pagination metadata
+      const totalPages = Math.ceil(totalProducts / limit);
+
+      res.json({
+        success: true,
+        data: {
+          products,
+          pagination: {
+            current_page: page,
+            total_pages: totalPages,
+            total_products: totalProducts,
+            limit: limit,
+            has_next: page < totalPages,
+            has_prev: page > 1,
+          },
+          search_criteria: {
+            name: name || null,
+            description: description || null,
+            price: price ? parseInt(price) : null,
+            min_stock: min_stock ? parseInt(min_stock) : null,
+            max_stock: max_stock ? parseInt(max_stock) : null,
+            age_category_id: age_category_id ? parseInt(age_category_id) : null,
+            age_label: age_label || null,
+            min_month: min_month ? parseInt(min_month) : null,
+            max_month: max_month ? parseInt(max_month) : null,
+            size_category_id: size_category_id
+              ? parseInt(size_category_id)
+              : null,
+            size_label: size_label || null,
+            custom_value_cm: custom_value_cm ? parseInt(custom_value_cm) : null,
+            is_custom:
+              is_custom !== undefined
+                ? is_custom === "true" || is_custom === "1"
+                : null,
+            sort_by: sort_by || "created_at",
+            sort_order: sort_order || "desc",
+          },
+        },
+      });
+    } catch (error) {
+      console.error("Product search error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to search products",
+      });
+    }
+  },
+
   getDashboardStats: async function (req, res, next) {
     try {
       // Get total products count
@@ -625,7 +849,6 @@ inner join size_categories sc ON  sc.id=p.size_category_id ORDER BY created_at D
         "SELECT COALESCE(SUM(total_price), 0) as total_revenue FROM orders WHERE status = 'selesai'"
       );
 
-      
       res.json({
         success: true,
         data: {
